@@ -1,22 +1,29 @@
 import streamlit as st
 import requests
-from elevenlabs import generate, save, set_api_key
+import torchaudio
+from tortoise.api import TextToSpeech
+import tempfile
+import os
+import torch
+from pydub import AudioSegment
 
 # -----------------------------
 # 🔧 FUNCTION DEFINITIONS
 # -----------------------------
 
-def generate_story(prompt):
+def generate_story(prompt, genre):
     headers = {
         "Authorization": f"Bearer {openrouter_api_key}",
         "Content-Type": "application/json"
     }
 
+    system_prompt = f"You are a talented Reddit writer crafting stories in the {genre} genre. Make it feel like a real post from r/confession or r/nosleep."
+
     payload = {
         "model": "mistralai/mixtral-8x7b-instruct",
         "messages": [
-            {"role": "system", "content": "You are a Reddit user who writes original and emotional or suspenseful stories for r/confession or r/nosleep."},
-            {"role": "user", "content": f"Write a detailed, engaging Reddit post story based on this idea:\n\n{prompt}"}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Write a detailed, engaging Reddit post in the style of {genre}. Use this idea:\n\n{prompt}"}
         ]
     }
 
@@ -28,65 +35,66 @@ def generate_story(prompt):
     else:
         raise Exception(f"OpenRouter Error: {response.text}")
 
-def get_elevenlabs_voices(api_key):
-    headers = {"xi-api-key": api_key}
-    response = requests.get("https://api.elevenlabs.io/v1/voices", headers=headers)
-    if response.status_code == 200:
-        voices = response.json()["voices"]
-        return {voice["name"]: voice["voice_id"] for voice in voices}
-    else:
-        raise Exception("Failed to fetch ElevenLabs voices.")
 
-def text_to_speech(text, voice_id, filename="story.mp3"):
-    set_api_key(elevenlabs_api_key)
-    audio = generate(
-        text=text,
-        voice=voice_id,
-        model='eleven_multilingual_v2'
-    )
-    save(audio, filename)
-    return filename
+def generate_tortoise_audio(text, voice='daniel', output_path='output.mp3'):
+    tts = TextToSpeech()
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    
+    combined_audio = None
+    sample_rate = 24000
+    for idx, para in enumerate(paragraphs):
+        with torch.inference_mode():
+            audio_tensor = tts.tts(para, voice=voice, preset='fast')
+        if combined_audio is None:
+            combined_audio = audio_tensor
+        else:
+            silence = torch.zeros(1, int(sample_rate * 0.75))  # 0.75 sec pause
+            combined_audio = torch.cat([combined_audio, silence, audio_tensor], dim=1)
+
+    # Save as WAV
+    wav_temp_path = tempfile.mktemp(suffix=".wav")
+    torchaudio.save(wav_temp_path, combined_audio.squeeze(0).cpu(), sample_rate)
+
+    # Convert to MP3
+    audio = AudioSegment.from_wav(wav_temp_path)
+    mp3_path = wav_temp_path.replace(".wav", ".mp3")
+    audio.export(mp3_path, format="mp3")
+
+    return mp3_path
 
 # -----------------------------
 # 🌐 STREAMLIT UI
 # -----------------------------
 
-st.set_page_config(page_title="AI Reddit Story Generator", page_icon="🎙️")
-st.title("🎙️ AI Reddit Story Audio Generator")
+st.set_page_config(page_title="AI Reddit Story Audio", page_icon="🎙️")
+st.title("🎙️ AI Reddit Story Generator (Tortoise TTS, MP3 Output)")
 
-# 🔐 API Keys
 openrouter_api_key = st.text_input("🔑 OpenRouter API Key", type="password")
-elevenlabs_api_key = st.text_input("🎤 ElevenLabs API Key", type="password")
+user_prompt = st.text_area("💡 Enter a story prompt", height=100)
 
-# 🌟 Story Prompt
-user_prompt = st.text_area("💡 Enter a story prompt (e.g., 'A man confesses something terrible from his childhood')", height=100)
+# 🎭 Genre Selection
+genres = ["Mystery", "Sad", "Funny", "Horror", "Romance", "Confession", "Drama"]
+selected_genre = st.selectbox("🎭 Choose Story Genre", genres)
 
-# 🎙️ Voice selection (dynamic)
-selected_voice_id = None
-if elevenlabs_api_key:
-    try:
-        voices_dict = get_elevenlabs_voices(elevenlabs_api_key)
-        voice_name = st.selectbox("🎤 Choose a voice", list(voices_dict.keys()))
-        selected_voice_id = voices_dict[voice_name]
-    except Exception as e:
-        st.error(f"❌ Could not load voices: {e}")
+# 🎤 Voice Selection
+available_voices = ["daniel", "emma", "lj", "rainbow", "train_dreams", "tom", "deniro"]
+selected_voice = st.selectbox("🎤 Choose Tortoise Voice", available_voices)
 
-# 🚀 Generate and Narrate
-if openrouter_api_key and elevenlabs_api_key and selected_voice_id:
+if openrouter_api_key:
     if st.button("📝 Generate Story and Narrate"):
         with st.spinner("Generating story and audio..."):
             try:
-                story = generate_story(user_prompt)
-                audio_file = text_to_speech(story, selected_voice_id)
+                story = generate_story(user_prompt, selected_genre)
+                mp3_path = generate_tortoise_audio(story, voice=selected_voice)
 
                 st.success("✅ Audio Ready!")
                 st.text_area("📖 Generated Story", story, height=300)
-                with open(audio_file, "rb") as f:
-                    audio_bytes = f.read()
-                    st.audio(audio_bytes, format="audio/mp3")
-                    st.download_button("⬇️ Download MP3", audio_bytes, file_name="reddit_story.mp3")
+                with open(mp3_path, "rb") as f:
+                    audio_data = f.read()
+                    st.audio(audio_data, format="audio/mp3")
+                    st.download_button("⬇️ Download MP3", audio_data, file_name="reddit_story.mp3")
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 else:
-    st.info("Enter your API keys and prompt to get started.")
+    st.info("Please enter your OpenRouter API key to begin.")
