@@ -1,5 +1,4 @@
 import streamlit as st
-import openai
 import requests
 import tempfile
 import os
@@ -8,41 +7,44 @@ from io import BytesIO
 from moviepy.editor import (
     ImageClip,
     concatenate_videoclips,
-    AudioFileClip,
-    CompositeVideoClip
+    AudioFileClip
 )
 import textwrap
 from elevenlabs import generate, save, set_api_key
 
-# Set up Streamlit input fields for API keys
-openai_api_key = st.text_input("OpenAI API Key", type="password")
+# Set up Streamlit input fields
+huggingface_api_key = st.text_input("Hugging Face API Key", type="password")
 elevenlabs_api_key = st.text_input("ElevenLabs API Key", type="password")
 
 VOICE_ID = "Rachel"  # Change this to your preferred ElevenLabs voice
 
-# ✅ Updated OpenAI v1.x client initialization
-client = openai.OpenAI(api_key=openai_api_key)
-
 def generate_script(prompt):
-    response = client.chat.completions.create(
-        model='gpt-3.5-turbo',
-        messages=[
-            {"role": "system", "content": "Write a short engaging video script for a narrator, 1 to 2.5 minutes long."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    return response.choices[0].message.content
+    HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1"
+    headers = {"Authorization": f"Bearer {huggingface_api_key}"}
+    payload = {
+        "inputs": f"Write a 1 to 2.5 minute long script for a narrator based on this topic:\n\n{prompt}",
+        "parameters": {"max_new_tokens": 300}
+    }
+
+    response = requests.post(HF_API_URL, headers=headers, json=payload)
+    if response.status_code == 200:
+        return response.json()[0]['generated_text']
+    else:
+        raise Exception(f"Hugging Face Error: {response.text}")
 
 def get_image_from_dalle(prompt, size='512x512'):
-    response = client.images.generate(
-        model="dall-e-2",
-        prompt=prompt,
-        size=size,
-        n=1
+    # Uses Hugging Face Stable Diffusion via Replicate fallback
+    response = requests.post(
+        "https://api-inference.huggingface.co/models/prompthero/openjourney",
+        headers={"Authorization": f"Bearer {huggingface_api_key}"},
+        json={"inputs": prompt}
     )
-    image_url = response.data[0].url
-    img_data = requests.get(image_url).content
-    return Image.open(BytesIO(img_data))
+    if response.status_code == 200:
+        image_url = response.json()[0]["url"]
+        img_data = requests.get(image_url).content
+        return Image.open(BytesIO(img_data))
+    else:
+        raise Exception("Image generation failed")
 
 def text_to_speech_elevenlabs(text, filename='voice.mp3'):
     set_api_key(elevenlabs_api_key)
@@ -72,13 +74,13 @@ def make_video(script_text, image_prompts):
     final.write_videofile(out_path, fps=24)
     return out_path
 
-# Streamlit app UI
-st.title("🎬 AI Video Generator (Private)")
+# Streamlit UI
+st.title("🎬 Free AI Video Generator")
 
-if openai_api_key and elevenlabs_api_key:
-    prompt = st.text_area("Enter your video prompt:", height=100)
+if huggingface_api_key and elevenlabs_api_key:
+    prompt = st.text_area("Enter your video topic or idea:", height=100)
     if st.button("Generate Video"):
-        with st.spinner("Creating your video..."):
+        with st.spinner("Generating script and visuals..."):
             try:
                 script = generate_script(prompt)
                 img_prompts = textwrap.wrap(prompt, width=40)[:5]
@@ -90,4 +92,4 @@ if openai_api_key and elevenlabs_api_key:
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 else:
-    st.warning("🔑 Please enter your OpenAI and ElevenLabs API keys to continue.")
+    st.warning("🔐 Please enter both your Hugging Face and ElevenLabs API keys to continue.")
