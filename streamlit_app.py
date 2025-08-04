@@ -1,100 +1,61 @@
 import streamlit as st
-import requests
 import tempfile
 import os
-from pydub import AudioSegment
+import subprocess
+from TTS.api import TTS
 
-# -----------------------------
-# 🎤 Coqui TTS Endpoint (Free)
-# -----------------------------
-COQUI_API_URL = "https://app.coqui.ai/api/v2/synthesize"
+# Initialize TTS model
+@st.cache_resource
+def load_tts_model():
+    return TTS(model_name="tts_models/en/multi-dataset/tortoise-v2", progress_bar=False, gpu=False)
 
-# -----------------------------
-# 🔧 FUNCTIONS
-# -----------------------------
+tts = load_tts_model()
 
-def generate_story(prompt, genre, openrouter_api_key):
-    headers = {
-        "Authorization": f"Bearer {openrouter_api_key}",
-        "Content-Type": "application/json"
-    }
+# Streamlit UI
+st.title("🎙️ AI Story Narrator with Tortoise TTS")
+st.markdown("Generate realistic voice narration from your own prompts.")
 
-    system_prompt = f"You are a Reddit storyteller writing in the genre: {genre}. Write a realistic, emotional, or suspenseful story like you'd find on r/confession or r/nosleep. Use multiple paragraphs."
+# Genre selection
+genre = st.selectbox("Choose a story genre:", ["Random", "Horror", "Romance", "Adventure", "Mystery", "Sci-Fi"])
+user_prompt = st.text_area("Enter your story prompt or idea here:")
 
-    payload = {
-        "model": "mistralai/mixtral-8x7b-instruct",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Write a Reddit story based on this idea:\n\n{prompt}"}
-        ]
-    }
+# Voice selection
+voice = st.selectbox("Choose a voice:", ["tom", "deniro", "pat", "jessica", "william", "lj", "emma"])
+generate_button = st.button("🎤 Generate Narration")
 
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+def generate_story_text(prompt, genre):
+    # Simple text generation without external APIs (replace with OpenRouter or local LLM if desired)
+    base = f"Here's a {genre.lower()} story: {prompt}\n\n"
+    paragraphs = [
+        "It all began on a day like any other, yet something felt different.",
+        "As the hours passed, unexpected events unfolded that would change everything.",
+        "The character faced a challenge they never anticipated, pushing them to their limits.",
+        "In the end, nothing was quite the same — but some things were finally understood.",
+    ]
+    return base + "\n\n".join(paragraphs)
 
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"].strip()
-    else:
-        raise Exception(f"OpenRouter Error: {response.text}")
+def convert_wav_to_mp3(wav_path, mp3_path):
+    subprocess.run([
+        "ffmpeg", "-y", "-i", wav_path, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", mp3_path
+    ], check=True)
 
+if generate_button and user_prompt:
+    with st.spinner("Generating story and audio..."):
+        story_text = generate_story_text(user_prompt, genre)
+        
+        # Generate audio using Tortoise
+        temp_dir = tempfile.mkdtemp()
+        wav_path = os.path.join(temp_dir, "story.wav")
+        mp3_path = os.path.join(temp_dir, "story.mp3")
+        
+        tts.tts_to_file(text=story_text, file_path=wav_path, speaker=voice)
+        convert_wav_to_mp3(wav_path, mp3_path)
 
-def synthesize_with_coqui(text, voice="Jenny", output_path="output.mp3"):
-    # Coqui's public demo endpoint may change, replace with a stable key if needed
-    payload = {
-        "speaker_id": voice,
-        "text": text,
-        "emotion": "neutral",
-        "speed": 1.0,
-    }
+        # Display result
+        st.success("Narration complete!")
+        st.markdown("### 📝 Story Preview")
+        st.text(story_text)
 
-    headers = {
-        "accept": "audio/mpeg",
-        "Content-Type": "application/json"
-    }
-
-    response = requests.post(COQUI_API_URL, json=payload, headers=headers)
-    
-    if response.status_code == 200:
-        with open(output_path, "wb") as f:
-            f.write(response.content)
-        return output_path
-    else:
-        raise Exception(f"Coqui TTS Error: {response.status_code}: {response.text}")
-
-# -----------------------------
-# 🌐 STREAMLIT UI
-# -----------------------------
-
-st.set_page_config(page_title="Reddit Story Narrator (Free)", page_icon="📖")
-st.title("📖 AI Reddit Story Narrator (MP3 Export)")
-
-openrouter_api_key = st.text_input("🔐 OpenRouter API Key", type="password")
-user_prompt = st.text_area("📝 Enter a story idea or prompt", height=100)
-
-genres = ["Mystery", "Sad", "Funny", "Horror", "Romance", "Confession", "Drama"]
-selected_genre = st.selectbox("🎭 Choose a story genre", genres)
-
-voices = ["Jenny", "William", "Emma", "Michael"]
-selected_voice = st.selectbox("🗣️ Choose a voice (Coqui)", voices)
-
-if openrouter_api_key:
-    if st.button("🎙️ Generate Narrated Story"):
-        with st.spinner("Generating story and audio..."):
-            try:
-                # 1. Generate story
-                story = generate_story(user_prompt, selected_genre, openrouter_api_key)
-
-                # 2. Generate MP3 using Coqui TTS
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-                    mp3_path = synthesize_with_coqui(story, voice=selected_voice, output_path=tmp_file.name)
-
-                # 3. Output
-                st.success("✅ Narration Ready!")
-                st.text_area("📘 Reddit Story", story, height=300)
-                audio_bytes = open(mp3_path, "rb").read()
-                st.audio(audio_bytes, format="audio/mp3")
-                st.download_button("⬇️ Download MP3", audio_bytes, file_name="reddit_story.mp3")
-
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-else:
-    st.warning("Enter your OpenRouter API key to start.")
+        st.audio(mp3_path, format="audio/mp3")
+        with open(mp3_path, "rb") as f:
+            st.download_button("⬇️ Download MP3", f, file_name="narrated_story.mp3")
