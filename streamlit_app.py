@@ -25,7 +25,7 @@ client = openai.OpenAI(api_key=openai_api_key)
 
 def generate_script(prompt):
     response = client.chat.completions.create(
-        model='gpt-4',
+        model='gpt-3.5-turbo',
         messages=[
             {"role": "system", "content": "Write a short engaging video script for a narrator, 1 to 2.5 minutes long."},
             {"role": "user", "content": prompt}
