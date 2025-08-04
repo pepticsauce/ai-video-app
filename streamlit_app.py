@@ -1,104 +1,41 @@
 import streamlit as st
-import requests
-import random
+import shutil
 import os
-import tempfile
+from ai_clipper import download_video, transcribe_video, extract_highlights, create_clips
 
-# Streamlit setup
-st.set_page_config(page_title="AI Reddit Narrator", layout="centered")
-st.title("📖 AI Reddit Narrator")
-st.markdown("Narrated Reddit story + Minecraft parkour background (via YouTube)")
+st.title("🎬 AI TikTok Clipper")
+st.write("Paste a YouTube or Twitch link. Get 50 AI-generated vertical clips (8–27 sec each).")
 
-# Hugging Face token (from Streamlit Secrets or hardcoded)
-HUGGING_FACE_TOKEN = st.secrets.get("HUGGING_FACE_TOKEN", "hf_your_token_here")
+url = st.text_input("Enter Video URL")
+run = st.button("Generate AI Clips")
 
-# Story source
-story_source = st.radio("Choose story source:", ["Reddit (r/stories)", "Paste your own"])
-custom_story = None
-if story_source == "Paste your own":
-    custom_story = st.text_area("Paste your story here:", height=200)
+if run and url:
+    output_dir = "clips"
+    zip_file = "ai_clips.zip"
+    video_path = "video.mp4"
 
-start_button = st.button("🎬 Generate Narration")
+    with st.spinner("Processing video..."):
+        try:
+            # Step 1: Download video
+            download_video(url, video_path)
 
-# ------------ Reddit Fetch (Pushshift) -------------
-def get_reddit_story():
-    try:
-        url = "https://api.pushshift.io/reddit/search/submission/?subreddit=stories&sort=desc&size=20"
-        res = requests.get(url)
-        posts = res.json().get("data", [])
-        for post in posts:
-            title = post.get("title", "")
-            body = post.get("selftext", "")
-            if len(body.strip()) > 100:
-                return f"{title}\n\n{body}"
-        return "No suitable stories found."
-    except Exception as e:
-        return f"Error fetching from Pushshift: {e}"
+            # Step 2: Transcribe
+            transcript = transcribe_video(video_path)
 
-# ------------ Text Chunking -------------
-def split_text(text, max_len=500):
-    sentences = text.split('. ')
-    chunks, current = [], ""
-    for sentence in sentences:
-        if len(current + sentence) <= max_len:
-            current += sentence + ". "
-        else:
-            chunks.append(current.strip())
-            current = sentence + ". "
-    if current:
-        chunks.append(current.strip())
-    return chunks
+            # Step 3: Extract highlights
+            highlights = extract_highlights(transcript, 8, 27, [
+                "kill", "funny", "insane", "crazy", "clutch", "no way", "help", "wow"
+            ], 50)
 
-# ------------ Bark TTS -------------
-def bark_tts(text_chunk):
-    API_URL = "https://api-inference.huggingface.co/models/suno/bark"
-    headers = {
-        "Authorization": f"Bearer {HUGGING_FACE_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(API_URL, headers=headers, json={"inputs": text_chunk})
-    if response.status_code == 200:
-        temp_dir = tempfile.mkdtemp()
-        out_path = os.path.join(temp_dir, "chunk.wav")
-        with open(out_path, "wb") as f:
-            f.write(response.content)
-        return out_path
-    else:
-        st.error(f"Bark TTS failed: {response.status_code}")
-        return None
+            # Step 4: Create clips
+            create_clips(video_path, highlights, output_dir)
 
-# ------------ Narration Generator -------------
-def generate_bark_audio(full_text):
-    chunks = split_text(full_text)
-    audio_paths = []
-    for i, chunk in enumerate(chunks):
-        st.write(f"🔊 Generating chunk {i+1}/{len(chunks)}...")
-        audio_path = bark_tts(chunk)
-        if audio_path:
-            audio_paths.append(audio_path)
-        else:
-            st.warning(f"Chunk {i+1} failed.")
-    return audio_paths[0] if audio_paths else None
+            # Step 5: Zip clips
+            shutil.make_archive("ai_clips", 'zip', output_dir)
 
-# ------------ Main Flow -------------
-if start_button:
-    with st.spinner("📥 Fetching story..."):
-        story = custom_story if story_source == "Paste your own" else get_reddit_story()
+            # Download link
+            with open(zip_file, "rb") as f:
+                st.download_button("📥 Download All Clips", f, file_name="ai_clips.zip")
 
-    if story and "Error" not in story:
-        st.success("✅ Story loaded")
-        st.text_area("📝 Story Content", story, height=300)
-
-        with st.spinner("🔊 Generating narration..."):
-            audio_path = generate_bark_audio(story)
-
-        if audio_path:
-            st.audio(audio_path)
-            with open(audio_path, "rb") as f:
-                st.download_button("⬇️ Download Narration", f, file_name="narration.wav")
-
-        st.markdown("### 🎮 Minecraft Parkour Video")
-        st.video("https://www.youtube.com/watch?v=9A6FsOl3bdM")
-
-    else:
-        st.warning("No story found or provided.")
+        except Exception as e:
+            st.error(f"Error: {e}")
