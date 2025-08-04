@@ -1,3 +1,4 @@
 streamlit
+torchaudio
+transformers
 requests
-pydub==0.25.1
