@@ -1,5 +1,3 @@
 streamlit
 requests
-pyttsx3
-pydub
 moviepy
