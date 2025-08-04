@@ -1,3 +1,6 @@
 streamlit
-gTTS
 requests
+beautifulsoup4
+moviepy
+yt_dlp
+TTS  # or your specific Tortoise installation
