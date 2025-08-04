@@ -19,30 +19,30 @@ elevenlabs_api_key = st.text_input("ElevenLabs API Key", type="password")
 VOICE_ID = "Rachel"  # Change this to your preferred ElevenLabs voice
 
 def generate_script(prompt):
-    HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1"
+    HF_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
     headers = {"Authorization": f"Bearer {huggingface_api_key}"}
     payload = {
-        "inputs": f"Write a 1 to 2.5 minute long script for a narrator based on this topic:\n\n{prompt}",
+        "inputs": f"Write a 1 to 2.5 minute narrator script based on this prompt:\n\n{prompt}",
         "parameters": {"max_new_tokens": 300}
     }
 
     response = requests.post(HF_API_URL, headers=headers, json=payload)
     if response.status_code == 200:
-        return response.json()[0]['generated_text']
+        result = response.json()
+        return result[0]["generated_text"]
     else:
         raise Exception(f"Hugging Face Error: {response.text}")
 
-def get_image_from_dalle(prompt, size='512x512'):
-    # Uses Hugging Face Stable Diffusion via Replicate fallback
+def get_image_from_dalle(prompt):
+    # Replace with a different model if needed later
     response = requests.post(
         "https://api-inference.huggingface.co/models/prompthero/openjourney",
         headers={"Authorization": f"Bearer {huggingface_api_key}"},
         json={"inputs": prompt}
     )
     if response.status_code == 200:
-        image_url = response.json()[0]["url"]
-        img_data = requests.get(image_url).content
-        return Image.open(BytesIO(img_data))
+        image_bytes = response.content
+        return Image.open(BytesIO(image_bytes))
     else:
         raise Exception("Image generation failed")
 
@@ -75,7 +75,7 @@ def make_video(script_text, image_prompts):
     return out_path
 
 # Streamlit UI
-st.title("🎬 Free AI Video Generator")
+st.title("🎬 Free AI Video Generator (No OpenAI Needed)")
 
 if huggingface_api_key and elevenlabs_api_key:
     prompt = st.text_area("Enter your video topic or idea:", height=100)
