@@ -3,21 +3,17 @@ import requests
 import random
 import os
 import tempfile
-from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips
 
-# -------------------- CONFIG --------------------
-st.set_page_config(page_title="AI Reddit Narrator", layout="centered")
-st.title("📖 AI Reddit Narrator (Bark TTS + Minecraft Video)")
-st.markdown("Narrates Reddit stories using Bark TTS and overlays Minecraft parkour background.")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Reddit Narrator (No Video Merge)", layout="centered")
+st.title("📖 AI Reddit Narrator (Bark TTS, No Video Merge)")
+st.markdown("Reddit story narration + Minecraft parkour YouTube background (separate)")
 
-# Paste Hugging Face token here OR use secrets
+# Paste your Hugging Face token here or use secrets
 HUGGING_FACE_TOKEN = st.secrets.get("HUGGING_FACE_TOKEN", "hf_your_token_here")
 
-# -------------------- UI --------------------
 story_source = st.radio("Choose story source:", ["Reddit (r/stories)", "Paste your own"])
-start_button = st.button("🎬 Generate AI Narration Video")
-
-# -------------------- FUNCTIONS --------------------
+start_button = st.button("🎬 Generate Narration")
 
 def get_reddit_story():
     url = "https://www.reddit.com/r/stories/top/.json?t=day&limit=10"
@@ -59,38 +55,24 @@ def bark_tts(text_chunk):
             f.write(response.content)
         return out_path
     else:
+        st.error(f"Bark TTS failed: {response.status_code}")
         return None
 
 def generate_bark_audio(full_text):
     chunks = split_text(full_text)
-    audio_clips = []
+    audio_paths = []
     for i, chunk in enumerate(chunks):
         st.write(f"🔊 Generating audio chunk {i+1}/{len(chunks)}...")
         audio_path = bark_tts(chunk)
         if audio_path:
-            audio_clip = AudioFileClip(audio_path)
-            audio_clips.append(audio_clip)
+            audio_paths.append(audio_path)
         else:
             st.warning(f"Chunk {i+1} failed.")
-    final_audio = concatenate_audioclips(audio_clips)
-    final_audio_path = os.path.join(tempfile.mkdtemp(), "final_audio.wav")
-    final_audio.write_audiofile(final_audio_path)
-    return final_audio_path
-
-def merge_with_video(audio_path):
-    video_path = "assets/minecraft_clip.mp4"  # Add this file to your repo
-    output_path = os.path.join(tempfile.mkdtemp(), "final_video.mp4")
-
-    audio = AudioFileClip(audio_path)
-    video = VideoFileClip(video_path).subclip(0, audio.duration)
-    final = video.set_audio(audio)
-    final.write_videofile(output_path, codec="libx264", audio_codec="aac")
-    return output_path
-
-# -------------------- MAIN --------------------
+    # If multiple chunks, just return first for simplicity (no merge)
+    return audio_paths[0] if audio_paths else None
 
 if start_button:
-    with st.spinner("📥 Getting story..."):
+    with st.spinner("📥 Fetching story..."):
         if story_source == "Reddit (r/stories)":
             story = get_reddit_story()
         else:
@@ -100,20 +82,14 @@ if start_button:
         st.success("✅ Story ready")
         st.text_area("📝 Story Content", story, height=250)
 
-        with st.spinner("🔊 Generating narration with Bark TTS..."):
+        with st.spinner("🔊 Generating Bark narration..."):
             audio_path = generate_bark_audio(story)
             if audio_path:
                 st.audio(audio_path)
                 with open(audio_path, "rb") as f:
-                    st.download_button("⬇️ Download Audio", f, file_name="narration.wav")
+                    st.download_button("⬇️ Download Narration Audio", f, file_name="narration.wav")
 
-        with st.spinner("🎥 Merging with Minecraft background..."):
-            try:
-                video_path = merge_with_video(audio_path)
-                st.video(video_path)
-                with open(video_path, "rb") as f:
-                    st.download_button("⬇️ Download Final Video", f, file_name="final_story_video.mp4")
-            except Exception as e:
-                st.error("⚠️ Video merge failed. Make sure `assets/minecraft_clip.mp4` exists.")
+        st.markdown("### 🎮 Minecraft Parkour Background Video")
+        st.video("https://www.youtube.com/watch?v=9A6FsOl3bdM")
     else:
-        st.warning("No story available.")
+        st.warning("No story provided.")
