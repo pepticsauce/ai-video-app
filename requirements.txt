@@ -1,6 +1,7 @@
 streamlit
 openai
-moviepy
+moviepy==1.0.3
 Pillow
 requests
+imageio-ffmpeg
 elevenlabs
