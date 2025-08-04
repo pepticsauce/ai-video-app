@@ -4,30 +4,38 @@ import random
 import os
 import tempfile
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="AI Reddit Narrator (No Video Merge)", layout="centered")
-st.title("📖 AI Reddit Narrator (Bark TTS, No Video Merge)")
-st.markdown("Reddit story narration + Minecraft parkour YouTube background (separate)")
+# Streamlit setup
+st.set_page_config(page_title="AI Reddit Narrator", layout="centered")
+st.title("📖 AI Reddit Narrator")
+st.markdown("Narrated Reddit story + Minecraft parkour background (via YouTube)")
 
-# Paste your Hugging Face token here or use secrets
+# Hugging Face token (from Streamlit Secrets or hardcoded)
 HUGGING_FACE_TOKEN = st.secrets.get("HUGGING_FACE_TOKEN", "hf_your_token_here")
 
+# Story source
 story_source = st.radio("Choose story source:", ["Reddit (r/stories)", "Paste your own"])
+custom_story = None
+if story_source == "Paste your own":
+    custom_story = st.text_area("Paste your story here:", height=200)
+
 start_button = st.button("🎬 Generate Narration")
 
+# ------------ Reddit Fetch (Pushshift) -------------
 def get_reddit_story():
-    url = "https://www.reddit.com/r/stories/top/.json?t=day&limit=10"
-    headers = {'User-agent': 'Mozilla/5.0'}
     try:
-        res = requests.get(url, headers=headers)
-        posts = res.json()["data"]["children"]
-        post = random.choice(posts)
-        title = post["data"]["title"]
-        selftext = post["data"]["selftext"]
-        return f"{title}\n\n{selftext}"
-    except:
-        return "Failed to fetch story."
+        url = "https://api.pushshift.io/reddit/search/submission/?subreddit=stories&sort=desc&size=20"
+        res = requests.get(url)
+        posts = res.json().get("data", [])
+        for post in posts:
+            title = post.get("title", "")
+            body = post.get("selftext", "")
+            if len(body.strip()) > 100:
+                return f"{title}\n\n{body}"
+        return "No suitable stories found."
+    except Exception as e:
+        return f"Error fetching from Pushshift: {e}"
 
+# ------------ Text Chunking -------------
 def split_text(text, max_len=500):
     sentences = text.split('. ')
     chunks, current = [], ""
@@ -41,6 +49,7 @@ def split_text(text, max_len=500):
         chunks.append(current.strip())
     return chunks
 
+# ------------ Bark TTS -------------
 def bark_tts(text_chunk):
     API_URL = "https://api-inference.huggingface.co/models/suno/bark"
     headers = {
@@ -58,38 +67,38 @@ def bark_tts(text_chunk):
         st.error(f"Bark TTS failed: {response.status_code}")
         return None
 
+# ------------ Narration Generator -------------
 def generate_bark_audio(full_text):
     chunks = split_text(full_text)
     audio_paths = []
     for i, chunk in enumerate(chunks):
-        st.write(f"🔊 Generating audio chunk {i+1}/{len(chunks)}...")
+        st.write(f"🔊 Generating chunk {i+1}/{len(chunks)}...")
         audio_path = bark_tts(chunk)
         if audio_path:
             audio_paths.append(audio_path)
         else:
             st.warning(f"Chunk {i+1} failed.")
-    # If multiple chunks, just return first for simplicity (no merge)
     return audio_paths[0] if audio_paths else None
 
+# ------------ Main Flow -------------
 if start_button:
     with st.spinner("📥 Fetching story..."):
-        if story_source == "Reddit (r/stories)":
-            story = get_reddit_story()
-        else:
-            story = st.text_area("Paste your story here:")
+        story = custom_story if story_source == "Paste your own" else get_reddit_story()
 
-    if story:
-        st.success("✅ Story ready")
-        st.text_area("📝 Story Content", story, height=250)
+    if story and "Error" not in story:
+        st.success("✅ Story loaded")
+        st.text_area("📝 Story Content", story, height=300)
 
-        with st.spinner("🔊 Generating Bark narration..."):
+        with st.spinner("🔊 Generating narration..."):
             audio_path = generate_bark_audio(story)
-            if audio_path:
-                st.audio(audio_path)
-                with open(audio_path, "rb") as f:
-                    st.download_button("⬇️ Download Narration Audio", f, file_name="narration.wav")
 
-        st.markdown("### 🎮 Minecraft Parkour Background Video")
+        if audio_path:
+            st.audio(audio_path)
+            with open(audio_path, "rb") as f:
+                st.download_button("⬇️ Download Narration", f, file_name="narration.wav")
+
+        st.markdown("### 🎮 Minecraft Parkour Video")
         st.video("https://www.youtube.com/watch?v=9A6FsOl3bdM")
+
     else:
-        st.warning("No story provided.")
+        st.warning("No story found or provided.")
