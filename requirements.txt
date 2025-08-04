@@ -1,0 +1,6 @@
+streamlit
+openai
+moviepy
+Pillow
+requests
+elevenlabs
