@@ -1,102 +1,80 @@
 import streamlit as st
 import requests
-import tempfile
-import os
-from PIL import Image
-from io import BytesIO
-from moviepy.editor import (
-    ImageClip,
-    concatenate_videoclips,
-    AudioFileClip
-)
-import textwrap
 from elevenlabs import generate, save, set_api_key
 
-# 🔧 Function Definitions FIRST
+# -----------------------------
+# 🔧 FUNCTION DEFINITIONS
+# -----------------------------
 
-def generate_script(prompt):
-    HF_API_URL = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
-    headers = {"Authorization": f"Bearer {huggingface_api_key}"}
-    payload = {
-        "inputs": f"Write a 1 to 2.5 minute narrator script based on this prompt:\n\n{prompt}",
-        "parameters": {"max_new_tokens": 300}
+def generate_story(prompt):
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json"
     }
-    response = requests.post(HF_API_URL, headers=headers, json=payload)
+
+    payload = {
+        "model": "mistralai/mixtral-8x7b-instruct",
+        "messages": [
+            {"role": "system", "content": "You are a Reddit user who writes original and emotional or suspenseful stories for r/confession or r/nosleep."},
+            {"role": "user", "content": f"Write a detailed, engaging Reddit post story based on this idea:\n\n{prompt}"}
+        ]
+    }
+
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+
     if response.status_code == 200:
         result = response.json()
-        return result[0]["generated_text"]
+        return result["choices"][0]["message"]["content"].strip()
     else:
-        raise Exception(f"Hugging Face Error: {response.text}")
+        raise Exception(f"OpenRouter Error: {response.text}")
 
-def get_image_from_dalle(prompt):
-    url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2"
-    headers = {
-        "Authorization": f"Bearer {huggingface_api_key}",
-        "Accept": "image/png"
-    }
-    response = requests.post(url, headers=headers, json={"inputs": prompt})
-    if response.status_code == 200:
-        return Image.open(BytesIO(response.content))
-    else:
-        raise Exception(f"Image generation failed: {response.text}")
 
-def text_to_speech_elevenlabs(text, filename='voice.mp3'):
+def text_to_speech(text, voice, filename="story.mp3"):
     set_api_key(elevenlabs_api_key)
     audio = generate(
         text=text,
-        voice=VOICE_ID,
+        voice=voice,
         model='eleven_multilingual_v2'
     )
     save(audio, filename)
     return filename
 
-def make_video(script_text, image_prompts):
-    clips = []
-    duration = max(5, int(150 / len(image_prompts)))  # ~150s max total video length
-    for i, prompt in enumerate(image_prompts):
-        img = get_image_from_dalle(prompt)
-        path = f'image_{i}.png'
-        img.save(path)
-        clip = ImageClip(path).set_duration(duration).resize(width=720)
-        clips.append(clip)
+# -----------------------------
+# 🌐 STREAMLIT UI
+# -----------------------------
 
-    video = concatenate_videoclips(clips)
+st.set_page_config(page_title="AI Reddit Story Generator", page_icon="🎙️")
+st.title("🎙️ AI Reddit Story Audio Generator")
 
-    # Narration audio
-    audio_file = text_to_speech_elevenlabs(script_text)
-    audio_clip = AudioFileClip(audio_file).set_duration(video.duration)
+# 🔐 API Keys
+openrouter_api_key = st.text_input("🔑 OpenRouter API Key", type="password")
+elevenlabs_api_key = st.text_input("🎤 ElevenLabs API Key", type="password")
 
-    # Combine
-    final = video.set_audio(audio_clip)
-    temp_dir = tempfile.mkdtemp()
-    out_path = os.path.join(temp_dir, "output_video.mp4")
-    final.write_videofile(out_path, fps=24)
-    return out_path
+# 🔊 Voice selection
+available_voices = [
+    "Rachel", "Domi", "Bella", "Antoni", "Elli",
+    "Josh", "Arnold", "Adam", "Sam"
+]
+selected_voice = st.selectbox("🎤 Choose a voice", available_voices, index=0)
 
-# 🔐 API key inputs
-huggingface_api_key = st.text_input("Hugging Face API Key", type="password")
-elevenlabs_api_key = st.text_input("ElevenLabs API Key", type="password")
-VOICE_ID = "Rachel"
+# 📝 Prompt input and generate button
+if openrouter_api_key and elevenlabs_api_key:
+    user_prompt = st.text_area("💡 Enter a story prompt (e.g., 'A man confesses something terrible from his childhood')", height=100)
 
-# 🎬 Streamlit UI
-st.title("🎬 Free AI Video Generator (No OpenAI Needed)")
-
-if huggingface_api_key and elevenlabs_api_key:
-    prompt = st.text_area("Enter your video topic or idea:", height=100)
-
-    if st.button("Generate Video"):
-        with st.spinner("Generating video..."):
+    if st.button("📝 Generate Story and Narrate"):
+        with st.spinner("Generating story and audio..."):
             try:
-                script = generate_script(prompt)
-                img_prompts = textwrap.wrap(prompt, width=40)[:5]
-                video_path = make_video(script, img_prompts)
+                story = generate_story(user_prompt)
+                audio_file = text_to_speech(story, selected_voice)
 
-                st.success("✅ Your video is ready!")
-                with open(video_path, "rb") as f:
-                    st.video(f.read())
-                    st.download_button("⬇️ Download Video", f, file_name="ai_video.mp4")
+                st.success("✅ Audio Ready!")
+                st.text_area("📖 Generated Story", story, height=300)
+                with open(audio_file, "rb") as f:
+                    audio_bytes = f.read()
+                    st.audio(audio_bytes, format="audio/mp3")
+                    st.download_button("⬇️ Download MP3", audio_bytes, file_name="reddit_story.mp3")
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 else:
-    st.warning("🔐 Please enter both your Hugging Face and ElevenLabs API keys to continue.")
+    st.info("Please enter both API keys to begin.")
