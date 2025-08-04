@@ -1,23 +1,31 @@
 import streamlit as st
 import openai
-import textwrap
-from moviepy.editor import *
-from PIL import Image
 import requests
-from io import BytesIO
-from elevenlabs import generate, save, set_api_key
 import tempfile
 import os
+from PIL import Image
+from io import BytesIO
+from moviepy.editor import (
+    ImageClip,
+    concatenate_videoclips,
+    AudioFileClip,
+    CompositeVideoClip,
+    TextClip
+)
+import textwrap
+from elevenlabs import generate, save, set_api_key
 
-st.set_page_config(page_title="Private AI Video Generator", layout="centered")
+# Optional: Store your keys here (or input in app)
+openai_api_key = st.text_input("OpenAI API Key", type="password")
+elevenlabs_api_key = st.text_input("ElevenLabs API Key", type="password")
 
-openai_api_key = st.text_input("Enter OpenAI API Key", type="password")
-elevenlabs_api_key = st.text_input("Enter ElevenLabs API Key", type="password")
-VOICE_ID = 'Rachel'
+# Optional: Use a specific ElevenLabs voice
+VOICE_ID = "Rachel"  # Or another ElevenLabs voice name
+
 def generate_script(prompt):
+    openai.api_key = openai_api_key
     response = openai.ChatCompletion.create(
         model='gpt-4',
-        api_key=openai_api_key,
         messages=[
             {"role": "system", "content": "Write a short engaging video script for a narrator, 1 to 2.5 minutes long."},
             {"role": "user", "content": prompt}
@@ -26,8 +34,8 @@ def generate_script(prompt):
     return response['choices'][0]['message']['content']
 
 def get_image_from_dalle(prompt, size='512x512'):
+    openai.api_key = openai_api_key
     response = openai.Image.create(
-        api_key=openai_api_key,
         prompt=prompt,
         n=1,
         size=size
@@ -52,7 +60,7 @@ def create_subtitle_clips(script_text, total_duration):
     clips = []
     current_time = 0
     for sentence in sentences:
-        clip = TextClip(sentence, fontsize=28, color='white', bg_color='black', font='Arial-Bold')
+        clip = TextClip(sentence, fontsize=28, color='white', bg_color='black', font='Arial')
         clip = clip.set_position(('center', 'bottom')).set_duration(per_sentence_duration).set_start(current_time)
         clips.append(clip)
         current_time += per_sentence_duration
@@ -77,20 +85,22 @@ def make_video(script_text, image_prompts):
     final.write_videofile(out_path, fps=24)
     return out_path
 
-st.title("Private AI Video Generator")
+# Streamlit app UI
+st.title("🎬 AI Video Generator (Private)")
+
 if openai_api_key and elevenlabs_api_key:
     prompt = st.text_area("Enter your video prompt:", height=100)
     if st.button("Generate Video"):
-        with st.spinner("Creating video..."):
+        with st.spinner("Creating your video..."):
             try:
                 script = generate_script(prompt)
                 img_prompts = textwrap.wrap(prompt, width=40)[:5]
                 video_file = make_video(script, img_prompts)
-                st.success("✅ Video created!")
+                st.success("✅ Your video is ready!")
                 with open(video_file, "rb") as f:
                     st.video(f.read())
-                st.download_button("Download Video", open(video_file, "rb"), file_name="video.mp4")
+                    st.download_button("⬇️ Download Video", f, file_name="ai_video.mp4")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"❌ Error: {e}")
 else:
-    st.warning("Please enter your OpenAI & ElevenLabs API keys.")
+    st.warning("🔑 Please enter your OpenAI and ElevenLabs API keys to continue.")
