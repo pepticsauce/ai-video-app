@@ -9,38 +9,38 @@ from moviepy.editor import (
     ImageClip,
     concatenate_videoclips,
     AudioFileClip,
-    CompositeVideoClip,
-    TextClip
+    CompositeVideoClip
 )
 import textwrap
 from elevenlabs import generate, save, set_api_key
 
-# Optional: Store your keys here (or input in app)
+# Set up Streamlit input fields for API keys
 openai_api_key = st.text_input("OpenAI API Key", type="password")
 elevenlabs_api_key = st.text_input("ElevenLabs API Key", type="password")
 
-# Optional: Use a specific ElevenLabs voice
-VOICE_ID = "Rachel"  # Or another ElevenLabs voice name
+VOICE_ID = "Rachel"  # Change this to your preferred ElevenLabs voice
+
+# ✅ Updated OpenAI v1.x client initialization
+client = openai.OpenAI(api_key=openai_api_key)
 
 def generate_script(prompt):
-    openai.api_key = openai_api_key
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model='gpt-4',
         messages=[
             {"role": "system", "content": "Write a short engaging video script for a narrator, 1 to 2.5 minutes long."},
             {"role": "user", "content": prompt}
         ]
     )
-    return response['choices'][0]['message']['content']
+    return response.choices[0].message.content
 
 def get_image_from_dalle(prompt, size='512x512'):
-    openai.api_key = openai_api_key
-    response = openai.Image.create(
+    response = client.images.generate(
+        model="dall-e-2",
         prompt=prompt,
-        n=1,
-        size=size
+        size=size,
+        n=1
     )
-    image_url = response['data'][0]['url']
+    image_url = response.data[0].url
     img_data = requests.get(image_url).content
     return Image.open(BytesIO(img_data))
 
@@ -54,18 +54,6 @@ def text_to_speech_elevenlabs(text, filename='voice.mp3'):
     save(audio, filename)
     return filename
 
-def create_subtitle_clips(script_text, total_duration):
-    sentences = textwrap.wrap(script_text, width=80)
-    per_sentence_duration = total_duration / len(sentences)
-    clips = []
-    current_time = 0
-    for sentence in sentences:
-        clip = TextClip(sentence, fontsize=28, color='white', bg_color='black', font='Arial')
-        clip = clip.set_position(('center', 'bottom')).set_duration(per_sentence_duration).set_start(current_time)
-        clips.append(clip)
-        current_time += per_sentence_duration
-    return clips
-
 def make_video(script_text, image_prompts):
     clips = []
     duration = max(5, int(150 / len(image_prompts)))
@@ -78,8 +66,7 @@ def make_video(script_text, image_prompts):
     video = concatenate_videoclips(clips)
     audio_file = text_to_speech_elevenlabs(script_text)
     audio_clip = AudioFileClip(audio_file).set_duration(video.duration)
-    subtitles = create_subtitle_clips(script_text, video.duration)
-    final = CompositeVideoClip([video] + subtitles).set_audio(audio_clip)
+    final = video.set_audio(audio_clip)
     temp_dir = tempfile.mkdtemp()
     out_path = os.path.join(temp_dir, "output_video.mp4")
     final.write_videofile(out_path, fps=24)
