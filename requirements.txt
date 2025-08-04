@@ -1,5 +1,2 @@
 streamlit
-torchaudio
-transformers
-requests
-TTS
+gtts
